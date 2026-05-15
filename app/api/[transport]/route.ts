@@ -6,9 +6,7 @@ type Action = "SEPA_ALLOWED" | "DUNNING_ALLOWED" | "BLOCKED";
 const AIRTABLE_TOKEN = process.env.AIRTABLE_TOKEN!;
 const AIRTABLE_BASE_ID = process.env.AIRTABLE_BASE_ID!;
 const AIRTABLE_INVOICE_TABLE = process.env.AIRTABLE_INVOICE_TABLE!;
-const AIRTABLE_AUDIT_TABLE = process.env.AIRTABLE_AUDIT_TABLE!;
 const AIRTABLE_REVIEW_TABLE = process.env.AIRTABLE_REVIEW_TABLE!;
-const AIRTABLE_ALIGNMENT_TABLE = process.env.AIRTABLE_ALIGNMENT_TABLE!;
 
 const RESEND_API_KEY = process.env.RESEND_API_KEY || "";
 const BILLING_FROM_EMAIL = process.env.BILLING_FROM_EMAIL || "";
@@ -101,12 +99,6 @@ async function upsertManualReviewByInvoiceId(invoiceId: string, fields: Record<s
   const recordId = await findRecordIdByFormula(AIRTABLE_REVIEW_TABLE, `{invoice_id} = "${invoiceId}"`);
   if (recordId) return updateRecord(AIRTABLE_REVIEW_TABLE, recordId, fields);
   return createRecord(AIRTABLE_REVIEW_TABLE, fields);
-}
-
-async function upsertAlignmentByInvoiceId(invoiceId: string, fields: Record<string, unknown>) {
-  const recordId = await findRecordIdByFormula(AIRTABLE_ALIGNMENT_TABLE, `{Invoice} = "${invoiceId}"`);
-  if (recordId) return updateRecord(AIRTABLE_ALIGNMENT_TABLE, recordId, fields);
-  return createRecord(AIRTABLE_ALIGNMENT_TABLE, fields);
 }
 
 async function sendEmail(to: string, subject: string, html: string) {
@@ -394,17 +386,6 @@ const handler = createMcpHandler(
           dunning_level: newDunningLevel,
         });
 
-        await createRecord(AIRTABLE_AUDIT_TABLE, {
-          run_id: input.run_id,
-          invoice_id: input.invoice_id,
-          executed_action: "DUNNING_EMAIL_SENT",
-          outcome: input.outcome,
-          recipient: input.recipient,
-          old_dunning_level: input.old_dunning_level,
-          new_dunning_level: newDunningLevel,
-          timestamp: nowIso(),
-        });
-
         const result = { ...input, executed_action: "DUNNING_EMAIL_SENT", new_dunning_level: newDunningLevel };
         return { content: [{ type: "text", text: JSON.stringify(result) }], structuredContent: result };
       }
@@ -426,48 +407,6 @@ const handler = createMcpHandler(
         });
 
         const result = { ...input, updated: true };
-        return { content: [{ type: "text", text: JSON.stringify(result) }], structuredContent: result };
-      }
-    );
-
-    server.tool(
-      "write_audit_log",
-      "Writes one full agentic audit row.",
-      {
-        run_id: z.string(),
-        invoice_id: z.string(),
-        requested_action: z.string(),
-        policy_server_verdict: z.string(),
-        final_action: z.string(),
-        tool_call_trace: z.any().optional(),
-        retrieved_doc_ids: z.any().optional(),
-        model_used: z.string().optional().default(""),
-        error_state: z.string().nullable().optional(),
-        reasoning_summary_de: z.string().optional().default(""),
-        audit_note: z.string().optional().default(""),
-      },
-      async (input) => {
-        await createRecord(AIRTABLE_AUDIT_TABLE, {
-          run_id: input.run_id,
-          invoice_id: input.invoice_id,
-          requested_action: input.requested_action,
-          executed_action: input.policy_server_verdict,
-          final_action: input.final_action,
-          tools_called: Array.isArray(input.tool_call_trace)
-            ? input.tool_call_trace.map((s: any) => s?.tool).filter(Boolean).join(" → ")
-            : "",
-          tool_call_trace_json: JSON.stringify(input.tool_call_trace ?? []),
-          retrieved_doc_ids: Array.isArray(input.retrieved_doc_ids)
-            ? input.retrieved_doc_ids.join(", ")
-            : String(input.retrieved_doc_ids ?? ""),
-          model_used: input.model_used,
-          error_state: input.error_state ?? "",
-          reasoning_summary_de: input.reasoning_summary_de,
-          audit_note: input.audit_note,
-          timestamp: nowIso(),
-        });
-
-        const result = { ...input, audit_written: true };
         return { content: [{ type: "text", text: JSON.stringify(result) }], structuredContent: result };
       }
     );
